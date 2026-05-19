@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zaun Kalkulator FINAL STABLE</title>
+
+<style>
+body{
+  font-family:Arial;
+  background:#0f172a;
+  color:white;
+  padding:12px;
+}
+
+h2{margin-bottom:10px;font-size:20px;}
+
+button{
+  padding:10px;
+  border:none;
+  border-radius:10px;
+  cursor:pointer;
+  font-size:13px;
+}
+
+.primary{background:#2563eb;color:white;}
+.secondary{background:#1e293b;color:white;}
+.danger{background:#dc2626;color:white;}
+
+.layout{
+  display:grid;
+  grid-template-columns:220px 1fr 320px;
+  gap:10px;
+}
+
+.panel{
+  background:#1e293b;
+  padding:10px;
+  border-radius:10px;
+}
+
+table{
+  width:100%;
+  border-collapse:collapse;
+}
+
+td,th{
+  padding:6px;
+  border-bottom:1px solid #334155;
+  font-size:13px;
+}
+
+input{
+  width:100%;
+  padding:6px;
+  border-radius:8px;
+  border:none;
+  background:#0f172a;
+  color:white;
+}
+
+.project-item{
+  cursor:pointer;
+  padding:6px;
+  border-radius:8px;
+  margin-bottom:4px;
+}
+
+.project-active{
+  background:#2563eb;
+}
+
+.comment-btn{
+  width:28px;
+  height:28px;
+  border-radius:6px;
+}
+
+.comment-active{
+  background:#2563eb;
+}
+
+.popup{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.7);
+  display:none;
+  align-items:center;
+  justify-content:center;
+}
+
+.popup-inner{
+  background:#111827;
+  padding:15px;
+  border-radius:10px;
+  width:90%;
+  max-width:400px;
+}
+
+textarea{
+  width:100%;
+  height:120px;
+  background:#1e293b;
+  color:white;
+  border:none;
+  border-radius:8px;
+  padding:8px;
+}
+
+.shop-item{
+  padding:6px 0;
+  border-bottom:1px solid #334155;
+}
+
+@media(max-width:900px){
+  .layout{grid-template-columns:1fr;}
+}
+</style>
+</head>
+
+<body>
+
+<h2>Zaun Kalkulator FINAL STABLE</h2>
+
+<div>
+<button class="primary" onclick="addProject()">+ Zaun</button>
+<button class="secondary" onclick="addRow()">+ Position</button>
+<button class="secondary" onclick="exportJSON()">Export</button>
+<input type="file" onchange="importJSON(event)">
+</div>
+
+<div class="layout">
+
+<!-- PROJECTS -->
+<div class="panel">
+<h3>Zäune</h3>
+<div id="projects"></div>
+</div>
+
+<!-- TABLE -->
+<div class="panel">
+<table>
+<thead>
+<tr>
+<th>Position</th>
+<th>Menge</th>
+<th>Pack</th>
+<th>Preis</th>
+<th></th>
+</tr>
+</thead>
+<tbody id="table"></tbody>
+</table>
+
+<br>
+<b>Netto:</b> <span id="netto"></span> €<br>
+<b>Brutto:</b> <span id="brutto"></span> €
+</div>
+
+<!-- SHOP -->
+<div class="panel">
+<h3>Einkaufsliste</h3>
+<div id="shop"></div>
+</div>
+
+</div>
+
+<!-- COMMENT -->
+<div class="popup" id="popup">
+<div class="popup-inner">
+<h3>Kommentar</h3>
+<textarea id="comment"></textarea>
+<button class="primary" onclick="saveComment()">Speichern</button>
+<button class="danger" onclick="closePopup()">Schließen</button>
+</div>
+</div>
+
+<script>
+
+/* ===================== */
+/* TEMPLATE */
+/* ===================== */
+
+const TEMPLATE = [
+  {name:"Pfosten",qty:13,pack:1,price:22.95,comment:""},
+  {name:"H-Anker",qty:13,pack:1,price:8,comment:""},
+  {name:"Beton",qty:20,pack:1,price:0,comment:""},
+  {name:"Holzschrauben",qty:192,pack:12,price:0,comment:""},
+  {name:"Element",qty:10,pack:1,price:0,comment:""},
+  {name:"Winkel",qty:20,pack:1,price:0,comment:""},
+  {name:"Pfostenschrauben",qty:100,pack:10,price:0,comment:""}
+];
+
+/* ===================== */
+/* STATE SAFE */
+/* ===================== */
+
+let state = JSON.parse(localStorage.getItem("ZAUN_FINAL") || "{}");
+
+if(!state.projects || Object.keys(state.projects).length === 0){
+  state.projects = { "Standard": cloneTemplate() };
+}
+
+state.current ||= Object.keys(state.projects)[0];
+
+let editIndex = null;
+
+/* ===================== */
+/* SAVE */
+/* ===================== */
+
+function save(){
+  localStorage.setItem("ZAUN_FINAL", JSON.stringify(state));
+}
+
+/* ===================== */
+/* CLONE */
+/* ===================== */
+
+function cloneTemplate(){
+  return TEMPLATE.map(x => ({...x}));
+}
+
+/* ===================== */
+/* UPDATE (FIXED INPUT + COMMA + NO CURSOR BUG) */
+/* ===================== */
+
+let updateTimer = null;
+
+function update(i,key,val){
+
+  const item = state.projects[state.current][i];
+
+  if(key === "price"){
+    val = String(val).replace(",", ".");
+    item.price = val; // bewusst STRING → stabil beim Tippen
+  }
+  else if(key === "qty" || key === "pack"){
+    item[key] = val;
+  }
+  else {
+    item[key] = val;
+  }
+
+  save();
+
+  clearTimeout(updateTimer);
+  updateTimer = setTimeout(render, 250);
+}
+
+/* ===================== */
+/* PROJECTS */
+/* ===================== */
+
+function addProject(){
+  const name = prompt("Zaun Name?");
+  if(!name) return;
+
+  state.projects[name] = cloneTemplate();
+  state.current = name;
+
+  save();
+  render();
+}
+
+function switchProject(name){
+  state.current = name;
+  render();
+}
+
+/* ===================== */
+/* ROWS */
+/* ===================== */
+
+function addRow(){
+  state.projects[state.current].push({
+    name:"Neu",
+    qty:0,
+    pack:1,
+    price:0,
+    comment:""
+  });
+  render();
+}
+
+function deleteRow(i){
+  state.projects[state.current].splice(i,1);
+  save();
+  render();
+}
+
+/* ===================== */
+/* COMMENT */
+/* ===================== */
+
+function openComment(i){
+  editIndex = i;
+  document.getElementById("comment").value =
+    state.projects[state.current][i].comment || "";
+  document.getElementById("popup").style.display="flex";
+}
+
+function saveComment(){
+  state.projects[state.current][editIndex].comment =
+    document.getElementById("comment").value;
+
+  closePopup();
+  render();
+}
+
+function closePopup(){
+  document.getElementById("popup").style.display="none";
+}
+
+/* ===================== */
+/* RENDER */
+/* ===================== */
+
+function render(){
+
+  const list = state.projects[state.current];
+
+  /* PROJECTS */
+  let phtml = "";
+
+  Object.keys(state.projects).forEach(k=>{
+    const active = k === state.current;
+
+    phtml += `
+      <div class="project-item ${active?'project-active':''}"
+      onclick="switchProject('${k}')">
+        ${k}
+      </div>
+    `;
+  });
+
+  document.getElementById("projects").innerHTML = phtml;
+
+  /* TABLE */
+  let html = "";
+  let netto = 0;
+
+  list.forEach((x,i)=>{
+
+    const packs = Math.ceil(Number(x.qty) / Number(x.pack));
+    const price = parseFloat(String(x.price).replace(",", ".")) || 0;
+
+    netto += packs * price;
+
+    const hasComment = x.comment && x.comment.length > 0;
+
+    html += `
+      <tr>
+        <td><input value="${x.name}" oninput="update(${i},'name',this.value)"></td>
+        <td><input value="${x.qty}" oninput="update(${i},'qty',this.value)"></td>
+        <td><input value="${x.pack}" oninput="update(${i},'pack',this.value)"></td>
+        <td><input value="${x.price}" oninput="update(${i},'price',this.value)"></td>
+        <td>
+          <button class="comment-btn ${hasComment?'comment-active':''}"
+          onclick="openComment(${i})">💬</button>
+
+          <button class="danger" onclick="deleteRow(${i})">✖</button>
+        </td>
+      </tr>
+    `;
+  });
+
+  document.getElementById("table").innerHTML = html;
+
+  document.getElementById("netto").innerText = netto.toFixed(2);
+  document.getElementById("brutto").innerText = (netto*1.19).toFixed(2);
+
+  /* SHOP */
+  let shtml = "";
+
+  list.forEach(x=>{
+    const packs = Math.ceil(Number(x.qty) / Number(x.pack));
+    const price = parseFloat(String(x.price).replace(",", ".")) || 0;
+
+    shtml += `
+      <div class="shop-item">
+        <b>${x.name}</b><br>
+        ${packs} Pack → ${(packs * price).toFixed(2)} €
+      </div>
+    `;
+  });
+
+  document.getElementById("shop").innerHTML = shtml;
+
+  save();
+}
+
+/* INIT */
+render();
+
+</script>
+
+</body>
+</html>
